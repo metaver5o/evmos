@@ -1,0 +1,75 @@
+version: '3.9'
+
+services:
+  evm-node:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: evm-node
+    ports:
+      - "26656:26656"
+      - "26657:26657"
+      - "1317:1317"
+      - "8545:8545"
+      - "8546:8546"
+    volumes:
+      - ./data:/root/.ethermintd  # Adjust as needed
+    networks:
+      - evm-network
+    restart: always
+    environment:
+      - EVM_CHAIN_ID=9000
+
+  evm-db:
+    image: postgres:13.20
+    container_name: evm-db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=blockscout
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - evm-network
+    restart: always
+    mem_limit: 1g
+
+  mintscan:
+    build:
+      context: ./mintscan      # Path to your Mintscan Dockerfile and source
+      dockerfile: Dockerfile     # Ensure this Dockerfile builds your Mintscan app (e.g., a React app)
+    container_name: mintscan
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://evm-node:8545
+      - NEXT_PUBLIC_NETWORK_NAME=Ethermint
+      - NEXT_PUBLIC_NETWORK_ICON=/icon.png
+      - NEXT_PUBLIC_NETWORK_LOGO=/logo.png
+    networks:
+      - evm-network
+    restart: unless-stopped
+
+  proxy:
+    image: nginx:1.27.4
+    container_name: proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./templates:/etc/nginx/templates
+    depends_on:
+      - mintscan
+    networks:
+      - evm-network
+    restart: always
+
+networks:
+  evm-network:
+    driver: bridge
