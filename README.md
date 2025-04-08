@@ -1,4 +1,5 @@
 ```
+git clone git@github.com:metaver5o/evmos.git && cd evmos
 git clone https://github.com/evmos/evmos.git 
 
 VIA DOCKER
