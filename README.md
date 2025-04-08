@@ -13,6 +13,6 @@ docker-compose up
 
 FOR TESTING
  docker run -ti -P -u root -v $PWD:/tmp --entrypoint=bash evmos
- ./evmos.sh
+ cd /tmp && source .env && ./evmos.sh
 
 ```
