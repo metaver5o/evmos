@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
 
     steps:
@@ -17,13 +17,22 @@ jobs:
       - name: Clone upstream repository
         run: |
           git clone https://github.com/evmos/evmos.git
-          # Optionally, change directory if needed:
           ls -la
 
       - name: Build Docker image
         run: |
           DOCKER_BUILDKIT=1 docker build -t evmos -f Dockerfile evmos/ --no-cache
 
-      - name: Run Docker container to check health
+      - name: Check evmosd version
         run: |
           docker run --rm evmos evmosd version
+
+      - name: Run container and test JSON-RPC health check
+        run: |
+          # Start the container in detached mode
+          docker run -d --name evmos-test -p 8545:8545 evmos
+          # Wait for the node to start and expose JSON-RPC endpoint
+          sleep 15
+          # Check that JSON-RPC endpoint responds (adjust URL/path as needed)
+          curl --fail http://localhost:8545 || (docker logs evmos-test && exit 1)
+          docker stop evmos-test
