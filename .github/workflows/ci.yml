@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout current repo
+        uses: actions/checkout@v3
+
+      - name: Clone upstream repository
+        run: |
+          git clone https://github.com/evmos/evmos.git
+          # Optionally, change directory if needed:
+          ls -la
+
+      - name: Build Docker image
+        run: |
+          DOCKER_BUILDKIT=1 docker build -t evmos -f Dockerfile evmos/ --no-cache
+
+      - name: Run Docker container to check health
+        run: |
+          docker run --rm evmos evmosd version
