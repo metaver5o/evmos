@@ -44,6 +44,7 @@ Deploy a local development chain:
 
 Deploy a mainnet node:
 ```bash
+    $ source .env
     $ evmos mainnet
 ```
 
