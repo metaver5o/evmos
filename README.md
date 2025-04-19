@@ -50,8 +50,8 @@ Deploy a mainnet node:
 
 Deploy a testnet node:
 ```bash
-$ source .env
-$ evmos testnet
+    $ source .env
+    $ evmos testnet
 ```
 
 ## Configuration
