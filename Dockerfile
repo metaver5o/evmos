@@ -2,14 +2,14 @@
 # DOCKER_BUILDKIT=1 docker build -t evmos -f Dockerfile evmos/ --no-cache
 
 # Run with proper port mapping and volume for persistence
-# docker run -it --name evmos-node \
-  # -p 26656:26656 \
-  # -p 26657:26657 \ 
-  # -p 1317:1317 \
-  # -p 8545:8545 \
-  # -p 8546:8546 \
-  # -v evmos-data:/home/evmos/.evmosd \
-  # evmos
+    # docker run -d --name evmos-node \
+    # -p 26656:26656 \
+    # -p 26657:26657 \
+    # -p 1317:1317 \
+    # -p 8545:8545 \
+    # -p 8546:8546 \
+    # -v evmos-data:/home/evmos/.evmosd \
+    # evmos
 
   
 # hadolint global ignore=DL3018
@@ -53,7 +53,7 @@ RUN go install github.com/MinseokOh/toml-cli@latest
 FROM alpine:3.21
 
 WORKDIR /home/evmos
-
+RUN mkdir -p /home/evmos/.evmosd && chown -R 1000:1000 /home/evmos/.evmosd
 COPY --from=build-env /go/src/github.com/evmos/evmos/build/evmosd /usr/bin/evmosd
 COPY --from=build-env /go/bin/toml-cli /usr/bin/toml-cli
 
@@ -94,30 +94,29 @@ if [ ! -f /home/evmos/.evmosd/config/genesis.json ]; then \
   rm -rf /home/evmos/.evmosd/config || true && \
   mkdir -p /home/evmos/.evmosd/config && \
   \
-  # Initialize with numeric chain ID \
-  evmosd init \"$MONIKER\" --chain-id=evmos_9001-2 --overwrite --keyring-backend=test && \
+  # Initialize chain with proper chain ID \
+  evmosd init \"$MONIKER\" --chain-id=\"$CHAIN_ID\" --overwrite --keyring-backend=$KEYRING_BACKEND && \
   \
-  # Add key (using test keyring backend) \
-  echo \"$KEY_MNEMONIC\" | evmosd keys add \"$KEY_NAME\" --recover --keyring-backend=test --output=json && \
+  # Add key \
+  echo \"$KEY_MNEMONIC\" | evmosd keys add \"$KEY_NAME\" --recover --keyring-backend=$KEYRING_BACKEND --output=json && \
   \
-  # Get address (must use same keyring backend) \
-  EVMOS_ADDRESS=$(evmosd keys show \"$KEY_NAME\" -a --keyring-backend=test) && \
+  # Get address \
+  EVMOS_ADDRESS=$(evmosd keys show \"$KEY_NAME\" -a --keyring-backend=$KEYRING_BACKEND) && \
   \
   # Add genesis account \
-  evmosd add-genesis-account \"$EVMOS_ADDRESS\" 100000000000000000000000000aevmos --keyring-backend=test && \
+  evmosd add-genesis-account \"$EVMOS_ADDRESS\" 100000000000000000000000000aevmos --keyring-backend=$KEYRING_BACKEND && \
   \
   # Create validator \
-  evmosd gentx \"$KEY_NAME\" 1000000000000000000000aevmos --chain-id=evmos_9001-2 --keyring-backend=test && \
+  evmosd gentx \"$KEY_NAME\" 1000000000000000000000aevmos --chain-id=\"$CHAIN_ID\" --keyring-backend=$KEYRING_BACKEND && \
   evmosd collect-gentxs && \
   \
-  # Update chain IDs \
-  sed -i 's/"chain_id": *"[^"]*"/"chain_id": "evmos_9001-2"/' /home/evmos/.evmosd/config/genesis.json && \
-  sed -i 's/"chain_id": *"[^"]*"/"chain_id": "evmos_9001-2"/' /home/evmos/.evmosd/config/genesis.json && \
+  # Ensure chain ID is properly set in genesis \
+  sed -i 's/\"chain_id\": *\"[^\"]*\"/\"chain_id\": \"'$CHAIN_ID'\"/' /home/evmos/.evmosd/config/genesis.json && \
   \
-  # Configure app \
+  # Configure minimum gas prices \
   evmosd config app.toml minimum-gas-prices \"0.0001aevmos\" && \
   \
   echo \"Initialization complete\"; \
 fi && \
-echo \"Starting Evmos node...\" && \
-exec evmosd start --json-rpc.enable --json-rpc.address=\"0.0.0.0:8545\""]
+# Start the node with proper chain ID \
+exec evmosd start --json-rpc.enable --json-rpc.address=\"0.0.0.0:8545\" --chain-id=\"$CHAIN_ID\""]
