@@ -1,17 +1,21 @@
-# Build with BuildKit
-# DOCKER_BUILDKIT=1 docker build -t evmos -f Dockerfile evmos/ --no-cache
+# docker rm -f evmos-node 2>/dev/null || true
+# docker volume create evmos-data 2>/dev/null || true
+# DOCKER_BUILDKIT=1  docker build -t evmos -f Dockerfile evmos/ --no-cache
+# docker run -it --name evmos-node \
+#   -e KEY_MNEMONIC="test test test test test test test test test test test junk" \
+#   -e MONIKER="my-node" \
+#   -e CHAIN_ID="evmos_9001-2" \
+#   -e KEY_NAME="my-key" \
+#   -e KEYRING_BACKEND="test" \
+#   -p 26656:26656 \
+#   -p 26657:26657 \
+#   -p 1317:1317 \
+#   -p 8545:8545 \
+#   -p 8546:8546 \
+#   -v evmos-data:/home/evmos/.evmosd \
+#   evmos
 
-# Run with proper port mapping and volume for persistence
-    # docker run -d --name evmos-node \
-    # -p 26656:26656 \
-    # -p 26657:26657 \
-    # -p 1317:1317 \
-    # -p 8545:8545 \
-    # -p 8546:8546 \
-    # -v evmos-data:/home/evmos/.evmosd \
-    # evmos
 
-  
 # hadolint global ignore=DL3018
 FROM golang:1.23.4-alpine3.20 AS build-env
 
@@ -78,13 +82,20 @@ USER 1000
 EXPOSE 26656 26657 1317 9090 8545 8546
 
 HEALTHCHECK CMD curl --fail http://localhost:26657 || exit 1
+# Replace the ENV section with this more flexible approach
+ARG MONIKER="my-node"
+ARG CHAIN_ID="evmos_9001-2"
+ARG KEY_NAME="my-key"
+ARG KEY_MNEMONIC="test test test test test test test test test test test junk"
+ARG KEYRING_BACKEND="test"
+ARG KEY_PASSPHRASE="12345678"
 
-# Define default environment variables
-ENV MONIKER="my-node" \
-    CHAIN_ID="evmos_9001-2" \
-    KEY_NAME="my-key" \
-    KEY_MNEMONIC="test test test test test test test test test test test junk" \
-    KEY_PASSPHRASE="12345678"
+ENV MONIKER=$MONIKER \
+    CHAIN_ID=$CHAIN_ID \
+    KEY_NAME=$KEY_NAME \
+    KEY_MNEMONIC=$KEY_MNEMONIC \
+    KEYRING_BACKEND=$KEYRING_BACKEND \
+    KEY_PASSPHRASE=$KEY_PASSPHRASE
 
 # Default command: Initialize the chain if needed then start Evmos
 CMD ["/bin/sh", "-c", \
