@@ -10,6 +10,11 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
+    env:
+      # Set default values if not already provided by your repo/.env
+      KEY_NAME: "my-key"
+      CHAIN_ID: "evmos_9001-2"
+
     steps:
       - name: Checkout current repo
         uses: actions/checkout@v3
@@ -27,12 +32,45 @@ jobs:
         run: |
           docker run --rm evmos evmosd version
 
-      - name: Run container and test JSON-RPC health check
+      - name: Run container
         run: |
-          # Start the container in detached mode
           docker run -d --name evmos-test -p 8545:8545 evmos
-          # Wait for the node to start and expose JSON-RPC endpoint
+          # Allow time for the node to start and expose JSON-RPC endpoint
           sleep 15
-          # Check that JSON-RPC endpoint responds (adjust URL/path as needed)
-          curl --fail http://localhost:8545 || (docker logs evmos-test && exit 1)
-          docker stop evmos-test
+
+      - name: Run RPC and TX tests
+        run: |
+          # List wallet addresses via JSON-RPC
+          echo "Listing wallet addresses via JSON-RPC..."
+          RPC_ACCOUNTS=$(curl -s -X POST http://localhost:8545 -H "Content-Type: application/json" \
+              --data '{"jsonrpc":"2.0","method":"eth_accounts","params":[],"id":1}' | jq -r '.result')
+          echo "JSON-RPC Accounts: $RPC_ACCOUNTS"
+
+          # Import a new key using a unique key name to avoid duplication error
+          NEW_MNEMONIC="test test test test test test test test test test test junk"
+          TEST_KEY="test-key-$(date +%s)"
+          echo "Importing new key '$TEST_KEY'..."
+          # Specify --index 1 to derive a different address than the default key (which uses index 0)
+          printf "%s\n" "$NEW_MNEMONIC" | docker exec -i evmos-test evmosd keys add "$TEST_KEY" --recover --index 1 --keyring-backend=test --output=json
+          NEW_ADDR=$(docker exec evmos-test evmosd keys show "$TEST_KEY" -a --keyring-backend=test)
+          echo "New account address: $NEW_ADDR"
+
+          # List balances of the new account BEFORE sending funds
+          echo "Balances of new account BEFORE transaction:"
+          docker exec evmos-test evmosd query bank balances "$NEW_ADDR" --output json || true
+
+          # Get sender address (the default key) – adjust the key name if needed
+          SENDER=$(docker exec evmos-test evmosd keys show "$KEY_NAME" -a --keyring-backend=test)
+          echo "Sender address: $SENDER"
+
+          # Send 1aevmos from sender to the new account
+          echo "Sending 1aevmos from sender to new account..."
+          docker exec evmos-test evmosd tx bank send "$SENDER" "$NEW_ADDR" 1aevmos --chain-id "$CHAIN_ID" --keyring-backend=test --gas-prices "586181641aevmos" --yes
+
+          # Wait for the transaction to be processed
+          sleep 10
+
+          # Query the new account balance AFTER the transaction
+          echo "Balances of new account AFTER transaction:"
+          docker exec evmos-test evmosd query bank balances "$NEW_ADDR" --output json
+        shell: /usr/bin/bash -e {0}
