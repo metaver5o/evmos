@@ -65,7 +65,7 @@ jobs:
 
           # Send 1aevmos from sender to the new account
           echo "Sending 1aevmos from sender to new account..."
-          docker exec evmos-test evmosd tx bank send "$SENDER" "$NEW_ADDR" 1aevmos --chain-id "$CHAIN_ID" --keyring-backend=test --gas-prices "0.0001aevmos" --yes
+          docker exec evmos-test evmosd tx bank send "$SENDER" "$NEW_ADDR" 1aevmos --chain-id "$CHAIN_ID" --keyring-backend=test --gas-prices "586181641aevmos" --yes
 
           # Wait for the transaction to be processed
           sleep 10
