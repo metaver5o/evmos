@@ -1,124 +1,136 @@
 name: Evmos Docker Network Test
 
 on:
-    workflow_dispatch:
-    push:
-        branches: [ test ]
+  workflow_dispatch:
+  push:
+    branches: [ test ]
 
 jobs:
-    test-evmos-connection:
-        runs-on: ubuntu-latest
-        steps:
-          - name: Checkout current repo
-            uses: actions/checkout@v3
-            
-          - name: Clone upstream repository
-            run: |
-              git clone https://github.com/evmos/evmos.git
-              ls -la
-              
-          - name: Build Docker image
-            run: |
-              DOCKER_BUILDKIT=1 docker build -t evmos -f Dockerfile evmos/ --no-cache
-              
-          - name: Install Docker Compose
-            run: |
-             sudo apt-get update
-             sudo apt-get install -y docker-compose
-          
-          - name: Create Docker Compose file
-            run: |
-              cat > docker-compose.yml << 'EOF'
-              version: '3.8'
-              services:
-                node1:
-                  image: evmos
-                  container_name: evmos-node1
-                  networks:
-                    - evmos-test-net
-                  ports:
-                    - "26656:26656"
-                    - "26657:26657"
-                  command: evmosd start --rpc.laddr tcp://0.0.0.0:26657 --p2p.laddr tcp://0.0.0.0:26656
-                  
-                node2:
-                  image: evmos
-                  container_name: evmos-node2
-                  networks:
-                    - evmos-test-net
-                  ports:
-                    - "26658:26656"
-                    - "26659:26657"
-                  command: >
-                    sh -c "sleep 10 && 
-                    evmosd start --rpc.laddr tcp://0.0.0.0:26657 --p2p.laddr tcp://0.0.0.0:26656
-                    --p2p.persistent_peers $${NODE1_ID}@node1:26656"
-                  depends_on:
-                    - node1
-                    
+  test-evmos-connection:
+    runs-on: ubuntu-latest
+    env:
+      KEY_NAME: "my-key"
+      CHAIN_ID: "evmos_9001-2"
+    steps:
+      - name: Checkout current repo
+        uses: actions/checkout@v3
+
+      - name: Clone upstream repository
+        run: |
+          git clone https://github.com/evmos/evmos.git
+          ls -la
+
+      - name: Build Docker image
+        run: |
+          DOCKER_BUILDKIT=1 docker build -t evmos -f Dockerfile evmos/ --no-cache
+
+      - name: Install Docker Compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose
+
+      - name: Create Docker Compose file
+        run: |
+          cat > docker-compose.yml << 'EOF'
+          version: '3.8'
+          services:
+            node1:
+              image: evmos
+              container_name: evmos-node1
               networks:
-                evmos-test-net:
-                  driver: bridge
-              EOF
-              
-          - name: Start containers with Docker Compose
-            run: |
-              sudo docker-compose up -d
-              
-          - name: Wait for node1 to start producing blocks
-            run: |
-              echo "Waiting for node1 to produce blocks..."
-              until docker exec evmos-node1 curl -s http://localhost:26657/status | jq -e '.result.sync_info.latest_block_height | tonumber > 0' ; do
-                echo "Node1 not ready yet, waiting..."
-                sleep 5
-              done
-              echo "Node1 is up and producing blocks."
-            shell: /usr/bin/bash -e {0}
-              
-          - name: Get node1's ID
-            id: node1_info
-            run: |
-              NODE1_ID=$(sudo docker exec evmos-node1 evmosd tendermint show-node-id)
-              echo "NODE1_ID=${NODE1_ID}" >> $GITHUB_ENV
-              echo "Node1 ID: ${NODE1_ID}"
-              
-          - name: Restart node2 with peer info
-            run: |
-              sudo docker-compose stop node2
-              sudo docker-compose rm -f node2
-              sudo NODE1_ID=$NODE1_ID docker-compose up -d node2
-              
-          - name: Verify connection between nodes
-            run: |
-              echo "Checking connection between nodes..."
-              until sudo docker exec evmos-node1 curl -s http://localhost:26657/net_info | jq -e '.result.peers | length > 0'; do
-                echo "Waiting for nodes to connect..."
-                sleep 5
-              done
+                - evmos-test-net
+              ports:
+                - "26656:26656"
+                - "26657:26657"
+              command: >
+                sh -c "if [ ! -f /home/evmos/.evmosd/config/genesis.json ]; then
+                  evmosd init testnode --chain-id evmos_9001-2 --overwrite;
+                fi && evmosd start --rpc.laddr tcp://0.0.0.0:26657 --p2p.laddr tcp://0.0.0.0:26656"
+            node2:
+              image: evmos
+              container_name: evmos-node2
+              networks:
+                - evmos-test-net
+              ports:
+                - "26658:26656"
+                - "26659:26657"
+              command: >
+                sh -c "sleep 10 && evmosd start --rpc.laddr tcp://0.0.0.0:26657 --p2p.laddr tcp://0.0.0.0:26656 --p2p.persistent_peers \$${NODE1_ID}@node1:26656"
+              depends_on:
+                - node1
+          networks:
+            evmos-test-net:
+              driver: bridge
+          EOF
 
-              PEER_COUNT=$(sudo docker exec evmos-node2 curl -s http://localhost:26657/net_info | jq '.result.peers | length')
-              if [ "$PEER_COUNT" -gt 0 ]; then
-                echo "✅ Success: Nodes are connected (${PEER_COUNT} peers)"
-              else
-                echo "❌ Error: Nodes failed to connect"
-                exit 1
-              fi
-              
-          - name: Run RPC and TX tests
-            run: |
-              echo "Listing wallet addresses via JSON-RPC..."
-              RPC_ACCOUNTS=$(curl -s -X POST http://localhost:8545 -H "Content-Type: application/json" \
-                --data '{"jsonrpc":"2.0","method":"eth_accounts","params":[],"id":1}' | jq -r '.result')
-              echo "JSON-RPC Accounts: $RPC_ACCOUNTS"
+      - name: Start containers with Docker Compose
+        run: |
+          sudo docker-compose up -d
 
-              NEW_MNEMONIC="test test test test test test test test test test test junk"
-              TEST_KEY="test-key-$(date +%s)"
-              echo "Importing new key '$TEST_KEY'..."
-              printf "%s\n" "$NEW_MNEMONIC" | docker exec -i evmos-node1 evmosd keys add "$TEST_KEY" --recover --index 1 --keyring-backend=test --output=json
-              NEW_ADDR=$(docker exec evmos-node1 evmosd keys show "$TEST_KEY" -a --keyring-backend=test)
-              echo "New account address: $NEW_ADDR"
+      - name: Wait for node1 to produce blocks
+        run: |
+          echo "Waiting for node1 to produce blocks..."
+          until docker exec evmos-node1 curl -s http://localhost:26657/status | jq -e '.result.sync_info.latest_block_height | tonumber > 0'; do
+            echo "Node1 not ready yet, waiting..."
+            sleep 5
+          done
+          echo "Node1 is up and producing blocks."
+        shell: /usr/bin/bash -e {0}
 
-              echo "Balances of new account BEFORE transaction:"
-              docker exec evmos-node1 evmosd query bank balances "$NEW_ADDR" --output json || true
+      - name: Get node1's ID
+        id: node1_info
+        run: |
+          NODE1_ID=$(docker exec evmos-node1 evmosd tendermint show-node-id)
+          echo "NODE1_ID=${NODE1_ID}" >> $GITHUB_ENV
+          echo "Node1 ID: ${NODE1_ID}"
 
-              SENDER=$(docker exec evmos-node1 evmosd keys show validator -a --keyring
+      - name: Restart node2 with peer info
+        run: |
+          sudo docker-compose stop node2
+          sudo docker-compose rm -f node2
+          sudo NODE1_ID=$NODE1_ID docker-compose up -d node2
+
+      - name: Verify connection between nodes
+        run: |
+          echo "Checking connection between nodes..."
+          until docker exec evmos-node1 curl -s http://localhost:26657/net_info | jq -e '.result.peers | length > 0'; do
+            echo "Waiting for nodes to connect..."
+            sleep 5
+          done
+          PEER_COUNT=$(docker exec evmos-node2 curl -s http://localhost:26657/net_info | jq '.result.peers | length')
+          if [ "$PEER_COUNT" -gt 0 ]; then
+            echo "✅ Success: Nodes are connected (${PEER_COUNT} peers)"
+          else
+            echo "❌ Error: Nodes failed to connect"
+            exit 1
+          fi
+
+      - name: Run RPC and TX tests
+        run: |
+          echo "Listing wallet addresses via JSON-RPC..."
+          RPC_ACCOUNTS=$(curl -s -X POST http://localhost:8545 -H "Content-Type: application/json" \
+            --data '{"jsonrpc":"2.0","method":"eth_accounts","params":[],"id":1}' | jq -r '.result')
+          echo "JSON-RPC Accounts: $RPC_ACCOUNTS"
+
+          NEW_MNEMONIC="test test test test test test test test test test test junk"
+          TEST_KEY="test-key-$(date +%s)"
+          echo "Importing new key '$TEST_KEY'..."
+          printf "%s\n" "$NEW_MNEMONIC" | docker exec -i evmos-node1 evmosd keys add "$TEST_KEY" --recover --index 1 --keyring-backend=test --output=json
+          NEW_ADDR=$(docker exec evmos-node1 evmosd keys show "$TEST_KEY" -a --keyring-backend=test)
+          echo "New account address: $NEW_ADDR"
+
+          echo "Balances of new account BEFORE transaction:"
+          docker exec evmos-node1 evmosd query bank balances "$NEW_ADDR" --output json || true
+
+          SENDER=$(docker exec evmos-node1 evmosd keys show validator -a --keyring-backend=test)
+          echo "Sender address: $SENDER"
+
+          echo "Sending 1aevmos from sender to new account..."
+          docker exec evmos-node1 evmosd tx bank send "$SENDER" "$NEW_ADDR" 1aevmos --chain-id "$CHAIN_ID" --keyring-backend=test --gas-prices "0.000001aevmos" --yes
+
+          echo "Waiting for transaction to process..."
+          sleep 10
+
+          echo "Balances of new account AFTER transaction:"
+          docker exec evmos-node1 evmosd query bank balances "$NEW_ADDR" --output json
+        shell: /usr/bin/bash -e {0}
