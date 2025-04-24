@@ -36,7 +36,7 @@ jobs:
               until sudo docker logs evmos-node1 2>&1 | grep -q "executed block"; do
                 eco "Waiting for node1 to start..."
                 sleep 5
-            done
+                done
 
           - name: Get node1's IP and ID
             id: node1_info
