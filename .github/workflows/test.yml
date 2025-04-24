@@ -42,9 +42,13 @@ jobs:
               ports:
                 - "26656:26656"
                 - "26657:26657"
+              environment:
+                - MONIKER=testnode
+                - CHAIN_ID=evmos_9001-2
               command: >
                 sh -c "if [ ! -f /home/evmos/.evmosd/config/genesis.json ]; then
-                  evmosd init testnode --chain-id evmos_9001-2 --overwrite;
+                  evmosd init testnode --chain-id evmos_9001-2 --overwrite &&
+                  sleep 10;
                 fi && evmosd start --rpc.laddr tcp://0.0.0.0:26657 --p2p.laddr tcp://0.0.0.0:26656"
             node2:
               image: evmos
