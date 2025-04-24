@@ -65,12 +65,15 @@ jobs:
             run: |
               sudo docker-compose up -d
               
-          - name: Wait for node1 to initialize
+          - name: Wait for node1 to start producing blocks
             run: |
-              until sudo docker logs evmos-node1 2>&1 | grep -q "executed block"; do
-                echo "Waiting for node1 to start..."
+              echo "Waiting for node1 to produce blocks..."
+              until docker exec evmos-node1 curl -s http://localhost:26657/status | jq -e '.result.sync_info.latest_block_height | tonumber > 0' ; do
+                echo "Node1 not ready yet, waiting..."
                 sleep 5
               done
+              echo "Node1 is up and producing blocks."
+            shell: /usr/bin/bash -e {0}
               
           - name: Get node1's ID
             id: node1_info
