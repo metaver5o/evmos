@@ -10,7 +10,7 @@ jobs:
         runs-on: ubuntu-latest
         steps:
           - name: Checkout current repo
-            uses: actions/checkout%3Ev3
+            uses: actions/checkout@v3
           - name: Clone upstream repository
             run: |
               git clone https://github.com/evmos/evmos.git
