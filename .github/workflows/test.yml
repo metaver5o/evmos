@@ -8,33 +8,39 @@ on:
 jobs:
     test-evmos-connection:
         runs-on: ubuntu-latest
-        steps:
-        - name: Checkout repository
-          uses: actions/checkout@v3
+    steps:
+       - name: Checkout current repo
+         uses: actions/checkout@v3
+       - name: Clone upstream repository
+         run: |
+           git clone https://github.com/evmos/evmos.git
+           ls -la
+       - name: Build Docker image
+         run: |
+           DOCKER_BUILDKIT=1 docker build -t evmos -f Dockerfile evmos/ --no-cache
+       - name: Create custom bridge network
+         run: sudo docker network create evmos-test-net
 
-        - name: Create custom bridge network
-          run: sudo docker network create evmos-test-net
-
-        - name: Launch first Evmos node (node1)
-          run: |
+       - name: Launch first Evmos node (node1)
+         run: |
             sudo docker run -d \
               --name evmos-node1 \
               --network evmos-test-net \
               -p 26656:26656 \
               -p 26657:26657 \
-              evmos/evmos \
+              evmos \
               evmosd start --rpc.laddr tcp://0.0.0.0:26657 --p2p.laddr tcp://0.0.0.0:26656
 
-        - name: Wait for node1 to initialize
-          run: |
+       - name: Wait for node1 to initialize
+         run: |
             until sudo docker logs evmos-node1 2>&1 | grep -q "executed block"; do
               echo "Waiting for node1 to start..."
               sleep 5
             done
 
-        - name: Get node1's IP and ID
-          id: node1_info
-          run: |
+       - name: Get node1's IP and ID
+         id: node1_info
+         run: |
             NODE1_IP=$(sudo docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' evmos-node1)
             NODE1_ID=$(sudo docker exec evmos-node1 evmosd tendermint show-node-id)
             echo "NODE1_IP=${NODE1_IP}" >> $GITHUB_ENV
@@ -42,19 +48,19 @@ jobs:
             echo "Node1 IP: ${NODE1_IP}"
             echo "Node1 ID: ${NODE1_ID}"
 
-        - name: Launch second Evmos node (node2)
-          run: |
+       - name: Launch second Evmos node (node2)
+         run: |
             sudo docker run -d \
               --name evmos-node2 \
               --network evmos-test-net \
               -p 26658:26656 \
               -p 26659:26657 \
-              evmos/evmos \
+              evmos \
               evmosd start --rpc.laddr tcp://0.0.0.0:26657 --p2p.laddr tcp://0.0.0.0:26656 \
               --p2p.persistent_peers "${{ env.NODE1_ID }}@${{ env.NODE1_IP }}:26656"
 
-        - name: Verify connection between nodes
-          run: |
+       - name: Verify connection between nodes
+         run: |
             echo "Checking connection between nodes..."
             until sudo docker exec evmos-node1 curl -s http://localhost:26657/net_info | jq -e '.result.peers | length > 0'; do
               echo "Waiting for nodes to connect..."
@@ -69,8 +75,8 @@ jobs:
               exit 1
             fi
 
-        - name: Run RPC and TX tests
-          run: |
+       - name: Run RPC and TX tests
+         run: |
             echo "Listing wallet addresses via JSON-RPC..."
             RPC_ACCOUNTS=$(curl -s -X POST http://localhost:8545 -H "Content-Type: application/json" \
               --data '{"jsonrpc":"2.0","method":"eth_accounts","params":[],"id":1}' | jq -r '.result')
@@ -96,14 +102,11 @@ jobs:
 
             echo "Balances of new account AFTER transaction:"
             docker exec evmos-test evmosd query bank balances "$NEW_ADDR" --output json
-          shell: /usr/bin/bash -e {0}
+        shell: /usr/bin/bash -e {0}
 
-        - name: Clean up
-          if: always()
-          run: |
+       - name: Clean up
+         if: always()
+         run: |
             sudo docker stop evmos-node1 evmos-node2 || true
             sudo docker rm evmos-node1 evmos-node2 || true
             sudo docker network rm evmos-test-net || true
-                sudo docker stop evmos-node1 evmos-node2 || true
-                sudo docker rm evmos-node1 evmos-node2 || true
-                sudo docker network rm evmos-test-net || true
