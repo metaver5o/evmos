@@ -21,6 +21,11 @@ jobs:
             run: |
               DOCKER_BUILDKIT=1 docker build -t evmos -f Dockerfile evmos/ --no-cache
               
+          - name: Install Docker Compose
+            run: |
+             sudo apt-get update
+             sudo apt-get install -y docker-compose
+          
           - name: Create Docker Compose file
             run: |
               cat > docker-compose.yml << 'EOF'
