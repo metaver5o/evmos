@@ -12,14 +12,6 @@ jobs:
         - name: Checkout repository
           uses: actions/checkout@v3
 
-        - name: Set up Docker
-          run: |
-            sudo apt-get update
-            sudo apt-get remove -y containerd
-            sudo apt-get install -y docker.io
-            sudo systemctl start docker
-            docker --version
-
         - name: Create custom bridge network
           run: sudo docker network create evmos-test-net
 
