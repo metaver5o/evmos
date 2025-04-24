@@ -105,7 +105,6 @@ jobs:
             shell: /usr/bin/bash -e {0}
 
           - name: Clean up
-            if: always
             run: |
               sudo docker stop evmos-node1 evmos-node2 || true
               sudo docker rm evmos-mode1 evmos-mode2 || true
