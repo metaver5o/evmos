@@ -47,9 +47,10 @@ jobs:
                 - CHAIN_ID=evmos_9001-2
               command: >
                 sh -c "if [ ! -f /home/evmos/.evmosd/config/genesis.json ]; then
-                  evmosd init testnode --chain-id evmos_9001-2 --overwrite &&
-                  sleep 10;
-                fi && evmosd start --rpc.laddr tcp://0.0.0.0:26657 --p2p.laddr tcp://0.0.0.0:26656"
+                         evmosd init testnode --chain-id evmos_9001-2 --overwrite &&
+                         sleep 10;
+                       fi;
+                       exec evmosd start --rpc.laddr tcp://0.0.0.0:26657 --p2p.laddr tcp://0.0.0.0:26656"
             node2:
               image: evmos
               container_name: evmos-node2
@@ -59,7 +60,8 @@ jobs:
                 - "26658:26656"
                 - "26659:26657"
               command: >
-                sh -c "sleep 10 && evmosd start --rpc.laddr tcp://0.0.0.0:26657 --p2p.laddr tcp://0.0.0.0:26656 --p2p.persistent_peers \$${NODE1_ID}@node1:26656"
+                sh -c "sleep 10 && 
+                       exec evmosd start --rpc.laddr tcp://0.0.0.0:26657 --p2p.laddr tcp://0.0.0.0:26656 --p2p.persistent_peers \$${NODE1_ID}@node1:26656"
               depends_on:
                 - node1
           networks:
@@ -71,14 +73,23 @@ jobs:
         run: |
           sudo docker-compose up -d
 
-      - name: Wait for node1 to produce blocks
+      - name: Wait for node1 to produce blocks (with timeout)
         run: |
           echo "Waiting for node1 to produce blocks..."
-          until docker exec evmos-node1 curl -s http://localhost:26657/status | jq -e '.result.sync_info.latest_block_height | tonumber > 0'; do
-            echo "Node1 not ready yet, waiting..."
-            sleep 5
+          max_attempts=30
+          attempt=1
+          while [ ${attempt} -le ${max_attempts} ]; do
+            block=$(docker exec evmos-node1 curl -s http://localhost:26657/status | jq -r '.result.sync_info.latest_block_height')
+            if [ "$block" != "null" ] && [ "$block" -gt 0 ]; then
+              echo "Node1 is producing blocks: $block"
+              exit 0
+            fi
+            echo "Attempt ${attempt}: Node1 not ready yet, waiting 10 seconds..."
+            sleep 10
+            attempt=$((attempt + 1))
           done
-          echo "Node1 is up and producing blocks."
+          echo "Node1 failed to produce blocks within timeout."
+          exit 1
         shell: /usr/bin/bash -e {0}
 
       - name: Get node1's ID
