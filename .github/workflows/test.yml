@@ -50,7 +50,7 @@ jobs:
                          evmosd init testnode --chain-id evmos_9001-2 --overwrite &&
                          sleep 10;
                        fi;
-                       exec evmosd start --rpc.laddr tcp://0.0.0.0:26657 --p2p.laddr tcp://0.0.0.0:26656"
+                       exec evmosd start --chain-id evmos_9001-2 --rpc.laddr tcp://0.0.0.0:26657 --p2p.laddr tcp://0.0.0.0:26656"
             node2:
               image: evmos
               container_name: evmos-node2
@@ -61,7 +61,7 @@ jobs:
                 - "26659:26657"
               command: >
                 sh -c "sleep 10 && 
-                       exec evmosd start --rpc.laddr tcp://0.0.0.0:26657 --p2p.laddr tcp://0.0.0.0:26656 --p2p.persistent_peers \$${NODE1_ID}@node1:26656"
+                       exec evmosd start --chain-id evmos_9001-2 --rpc.laddr tcp://0.0.0.0:26657 --p2p.laddr tcp://0.0.0.0:26656 --p2p.persistent_peers \$${NODE1_ID}@node1:26656"
               depends_on:
                 - node1
           networks:
