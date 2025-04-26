@@ -118,7 +118,7 @@ if [ ! -f /home/evmos/.evmosd/config/genesis.json ]; then \
   evmosd add-genesis-account \"$EVMOS_ADDRESS\" 100000000000000000000000000aevmos --keyring-backend=$KEYRING_BACKEND && \
   \
   # Create validator with increased delegation \
-  evmosd gentx \"$KEY_NAME\" 100000000000000000000000000aevmos --chain-id=\"$CHAIN_ID\" --keyring-backend=$KEYRING_BACKEND && \
+  evmosd gentx \"$KEY_NAME\" 1000000000000000000000000000aevmos --chain-id=\"$CHAIN_ID\" --commission-rate=0.1 --keyring-backend=$KEYRING_BACKEND && \
   evmosd collect-gentxs && \
   \
   # Ensure chain ID is properly set in genesis \
