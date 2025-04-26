@@ -114,11 +114,11 @@ if [ ! -f /home/evmos/.evmosd/config/genesis.json ]; then \
   # Get address \
   EVMOS_ADDRESS=$(evmosd keys show \"$KEY_NAME\" -a --keyring-backend=$KEYRING_BACKEND) && \
   \
-  # Add genesis account \
+  # Add genesis account with sufficient funds \
   evmosd add-genesis-account \"$EVMOS_ADDRESS\" 100000000000000000000000000aevmos --keyring-backend=$KEYRING_BACKEND && \
   \
-  # Create validator with increased delegation and explicit min-self-delegation \
-  evmosd gentx \"$KEY_NAME\" 10000000000000000000000000000aevmos --chain-id=\"$CHAIN_ID\" --commission-rate=0.1 --min-self-delegation=10000000000000000000000000000 --keyring-backend=$KEYRING_BACKEND && \
+  # Create validator with delegation and set min-self-delegation equal to that amount \
+  evmosd gentx \"$KEY_NAME\" 100000000000000000000000000aevmos --chain-id=\"$CHAIN_ID\" --commission-rate=0.1 --min-self-delegation=100000000000000000000000000aevmos --keyring-backend=$KEYRING_BACKEND && \
   evmosd collect-gentxs && \
   \
   # Ensure chain ID is properly set in genesis \
