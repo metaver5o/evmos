@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  node1:
+    image: evmos
+    container_name: evmos-node1
+    ports:
+      - "26656:26656"
+      - "26657:26657"
+      - "8545:8545"  # Expose JSON-RPC port for testing if needed
+    environment:
+      - MONIKER=testnode
+      - CHAIN_ID=evmos_9001-2
+    command: >
+      sh -c "if [ ! -f /home/evmos/.evmosd/config/genesis.json ]; then
+               evmosd init testnode --chain-id evmos_9001-2 --overwrite &&
+               sleep 10;
+             fi;
+             exec evmosd start --chain-id evmos_9001-2 --rpc.laddr tcp://0.0.0.0:26657 --p2p.laddr tcp://0.0.0.0:26656"
+    networks:
+      - evmos-test-net
+
+  node2:
+    image: evmos
+    container_name: evmos-node2
+    depends_on:
+      - node1
+    ports:
+      - "26658:26656"
+      - "26659:26657"
+    command: >
+      sh -c "sleep 10 &&
+             exec evmosd start --chain-id evmos_9001-2 --rpc.laddr tcp://0.0.0.0:26657 --p2p.laddr tcp://0.0.0.0:26656 --p2p.persistent_peers ${NODE1_ID}@node1:26656"
+    networks:
+      - evmos-test-net
+    environment:
+      # Pass NODE1_ID dynamically if needed, or set it manually after node1 is running.
+      - NODE1_ID=
+
+networks:
+  evmos-test-net:
+    driver: bridge
