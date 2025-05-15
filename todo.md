@@ -1,0 +1,15 @@
+- [ ] Review all relevant files, including `docker-compose.yml`, `docker-compose.test.yml`, and all `.env` files (e.g., `.env`, `evmos-local.env`, `evmos-mainnet.env`, `evmos-testnet.env`), and any genesis or script files.
+- [ ] **For `docker-compose.test.yml` ONLY:**
+    - [ ] Analyze and fix the mnemonic errors by correcting environment variable syntax (e.g., `{$VAR}` to `${VAR}`).
+    - [ ] Verify the validity and formatting of mnemonics in the relevant `.env` file for test setup.
+    - [ ] Ensure proper workflow for loading `.env` files and executing commands for the test environment.
+    - [ ] Ensure the existing balance transfer test works correctly (after mnemonic/currency/fee fixes applicable to test context).
+    - [ ] Implement and validate the node peering test (launch node1, wait, launch node2, check visibility).
+- [ ] **For `docker-compose.yml` and general project files (NOT `docker-compose.test.yml`):**
+    - [ ] Update fee settings to `0.0001ucash` in all relevant configuration files and scripts.
+    - [ ] Change all instances of the currency name from `aevmos` to `u.cash` in all relevant files (genesis, scripts, configurations).
+    - [ ] Add a faucet service to `docker-compose.yml`.
+    - [ ] Add a blockchain explorer service (e.g., Blockscout) to `docker-compose.yml`.
+- [ ] Document all changes, fixes, and new feature implementations for both main and test setups.
+- [ ] Provide clear, step-by-step instructions for the user to apply the changes and run both the main and test setups.
+- [ ] Create a final summary report detailing all modifications and test results.
