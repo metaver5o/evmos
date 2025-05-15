@@ -1,4 +1,4 @@
-name: Evmos Docker Network Test
+name: Evmos Docker Network Test (U.CASH)
 
 on:
   workflow_dispatch:
@@ -6,154 +6,252 @@ on:
     branches: [ test ]
 
 jobs:
-  test-evmos-connection:
+  test-evmos-uchain-connection:
     runs-on: ubuntu-latest
     env:
-      KEY_NAME: "my-key"
-      CHAIN_ID: "evmos_9001-2"
+      # These are example values. For actual CI, use GitHub secrets for mnemonics.
+      # These will be written to .env and used by docker-compose
+      MONIKER: "uchain-node1-ci"
+      KEY_NAME: "validator1-ci"
+      KEY_MNEMONIC: "${{ secrets.UCHAIN_NODE1_MNEMONIC || 
+        \"guard cream sadness conduct invite crumble clock pudding hole grit liar hotel maid produce squeeze return scan turtle manual focus trial pretty jeans task\" }}"
+      MONIKER_NODE2: "uchain-node2-ci"
+      KEY_NAME_NODE2: "validator2-ci"
+      KEY_MNEMONIC_NODE2: "${{ secrets.UCHAIN_NODE2_MNEMONIC || 
+        \"clip hire initial neck maid actor venue client foam budget lock catalog sweet steak waste crater broccoli pipe steak sister coyote moment obvious choose\" }}"
+      CHAIN_ID: "uchain_9001-1-ci" # Using a uchain specific chain ID
+      KEYRING_BACKEND: "test"
+
     steps:
       - name: Checkout current repo
         uses: actions/checkout@v3
 
-      - name: Clone upstream repository
-        run: |
-          git clone https://github.com/evmos/evmos.git
-          ls -la
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Build Docker image
         run: |
-          DOCKER_BUILDKIT=1 docker build -t evmos -f Dockerfile evmos/ --no-cache
+          # This assumes your Dockerfile is at the root of your repository 
+          # and the build context is also the root, or a specified path like ./evmos if that contains the Dockerfile and its context.
+          # The original script used: DOCKER_BUILDKIT=1 docker build -t evmos -f Dockerfile evmos/ --no-cache
+          # This implies Dockerfile is at root, context is ./evmos/
+          # Ensure the Dockerfile path and context (e.g., `evmos/`) are correct for your project structure.
+          if [ ! -d "evmos" ]; then
+             echo "Cloning evmos upstream into ./evmos for Docker build context as per original script."
+             git clone https://github.com/evmos/evmos.git evmos
+          fi
+          DOCKER_BUILDKIT=1 docker build -t uchain-node -f Dockerfile evmos/ --build-arg DB_BACKEND=goleveldb --progress=plain
 
-      - name: Install Docker Compose
+      - name: Install Docker Compose and jq
         run: |
           sudo apt-get update
-          sudo apt-get install -y docker-compose
+          sudo apt-get install -y docker-compose jq
 
-      - name: Create Docker Compose file
+      - name: Create .env file for Docker Compose
         run: |
-          cat > docker-compose.yml << 'EOF'
+          echo "MONIKER=${MONIKER}" > .env
+          echo "CHAIN_ID=${CHAIN_ID}" >> .env
+          echo "KEY_NAME=${KEY_NAME}" >> .env
+          echo "KEY_MNEMONIC=${KEY_MNEMONIC}" >> .env
+          echo "KEYRING_BACKEND=${KEYRING_BACKEND}" >> .env
+          echo "MONIKER_NODE2=${MONIKER_NODE2}" >> .env
+          echo "KEY_NAME_NODE2=${KEY_NAME_NODE2}" >> .env
+          echo "KEY_MNEMONIC_NODE2=${KEY_MNEMONIC_NODE2}" >> .env
+          # Create an empty evmos-local.env if your compose file references it and it might not exist
+          # This is referenced in the docker-compose.test.yml we are basing this on.
+          touch evmos-local.env 
+          echo "Created .env and evmos-local.env (empty) files."
+          cat .env
+
+      - name: Create Docker Compose file (uchain_test_workflow.yml)
+        run: |
+          cat > uchain_test_workflow.yml << EOF
           version: '3.8'
           services:
             node1:
-              image: evmos
-              container_name: evmos-node1
-              networks:
-                - evmos-test-net
+              image: uchain-node # Using the locally built image name
+              container_name: uchain-node1-ci
               ports:
                 - "26656:26656"
                 - "26657:26657"
-              environment:
-                - MONIKER=testnode
-                - CHAIN_ID=evmos_9001-2
+                - "1317:1317"
+                - "8545:8545"
+                - "8546:8546"
+              volumes:
+                - uchain_data1_ci:/home/evmos/.evmosd
+              env_file:
+                - .env
+                - evmos-local.env
               command: >
-                sh -c "if [ ! -f /home/evmos/.evmosd/config/genesis.json ]; then
-                         evmosd init testnode --chain-id evmos_9001-2 --overwrite &&
-                         sleep 10;
-                       fi;
-                       exec evmosd start --chain-id evmos_9001-2 --rpc.laddr tcp://0.0.0.0:26657 --p2p.laddr tcp://0.0.0.0:26656"
+                bash -c "set -e;
+                echo 'Initializing uchain-node1...';
+                evmosd init $${MONIKER} --chain-id=$${CHAIN_ID} --overwrite;
+                echo 'Modifying genesis.json for u.cash on node1...';
+                jq '.app_state.staking.params.bond_denom = \"ucash\" | 
+                    .app_state.inflation.params.mint_denom = \"ucash\" | 
+                    .app_state.gov.params.min_deposit[0].denom = \"ucash\" | 
+                    .app_state.gov.params.expedited_min_deposit[0].denom = \"ucash\" | 
+                    .app_state.erc20.token_pairs[0].denom = \"ucash\"' /home/evmos/.evmosd/config/genesis.json > /tmp/genesis.json && mv /tmp/genesis.json /home/evmos/.evmosd/config/genesis.json;
+                echo 'Adding key for node1...';
+                if [ -z \"$${KEY_MNEMONIC}\" ]; then echo 'Error: KEY_MNEMONIC for node1 is not set or empty.'; exit 1; fi;
+                echo \"$${KEY_MNEMONIC}\" | evmosd keys add $${KEY_NAME} --recover --keyring-backend=$${KEYRING_BACKEND};
+                echo 'Setting up genesis account and gentx for node1...';
+                NODE1_ADDRESS=$$(evmosd keys show $${KEY_NAME} -a --keyring-backend=$${KEYRING_BACKEND});
+                evmosd add-genesis-account $${NODE1_ADDRESS} 2000000000000000000ucash --keyring-backend=$${KEYRING_BACKEND}; # 2 million ucash (10^18 for 1 ucash)
+                evmosd gentx $${KEY_NAME} 1000000000000000000ucash --chain-id=$${CHAIN_ID} \
+                  --keyring-backend=$${KEYRING_BACKEND}; # 1 million ucash
+                evmosd collect-gentxs;
+                exec evmosd start --json-rpc.enable --json-rpc.address=0.0.0.0:8545 --api.enable"
+
             node2:
-              image: evmos
-              container_name: evmos-node2
-              networks:
-                - evmos-test-net
+              image: uchain-node # Using the locally built image name
+              container_name: uchain-node2-ci
+              depends_on:
+                node1:
+                  condition: service_started # Wait for node1 to start, peering logic handles actual readiness
               ports:
                 - "26658:26656"
                 - "26659:26657"
+                - "1318:1317"
+                - "8547:8545"
+                - "8548:8546"
+              volumes:
+                - uchain_data2_ci:/home/evmos/.evmosd
+              env_file:
+                - .env
+                - evmos-local.env
               command: >
-                sh -c "sleep 10 && 
-                       exec evmosd start --chain-id evmos_9001-2 --rpc.laddr tcp://0.0.0.0:26657 --p2p.laddr tcp://0.0.0.0:26656 --p2p.persistent_peers \$${NODE1_ID}@node1:26656"
-              depends_on:
-                - node1
-          networks:
-            evmos-test-net:
-              driver: bridge
+                bash -c "set -e;
+                echo 'Initializing uchain-node2...';
+                evmosd init $${MONIKER_NODE2} --chain-id=$${CHAIN_ID} --overwrite;
+                echo 'Adding key for node2...';
+                if [ -z \"$${KEY_MNEMONIC_NODE2}\" ]; then echo 'Error: KEY_MNEMONIC_NODE2 for node2 is not set or empty.'; exit 1; fi;
+                echo \"$${KEY_MNEMONIC_NODE2}\" | evmosd keys add $${KEY_NAME_NODE2} --recover --keyring-backend=$${KEYRING_BACKEND};
+                echo 'Waiting for uchain-node1 to be available...';
+                max_wait_node1=12; # 12 attempts * 5 seconds = 60 seconds
+                wait_count_node1=0;
+                until curl -sf http://node1:26657/status > /dev/null || [ $wait_count_node1 -ge $max_wait_node1 ]; do
+                  echo \"Node1 not ready (attempt $$(($wait_count_node1 + 1))/$max_wait_node1), waiting 5s...\";
+                  sleep 5;
+                  wait_count_node1=$((wait_count_node1 + 1));
+                done;
+                if ! curl -sf http://node1:26657/status > /dev/null; then echo 'Error: Node1 did not become available in time.'; exit 1; fi;
+                echo 'Copying genesis from node1...';
+                curl -s http://node1:26657/genesis | jq -r '.result.genesis' > /home/evmos/.evmosd/config/genesis.json;
+                echo 'Configuring peers for node2...';
+                NODE1_ID=$$(curl -s http://node1:26657/status | jq -r '.result.node_info.id');
+                if [ -z \"$${NODE1_ID}\" ]; then echo 'Error: Could not get NODE1_ID.'; exit 1; fi;
+                sed -i \"s|^persistent_peers = .*|persistent_peers = \\\"$${NODE1_ID}@node1:26656\\\"|\" /home/evmos/.evmosd/config/config.toml;
+                echo 'Starting uchain-node2...';
+                exec evmosd start --json-rpc.enable --json-rpc.address=0.0.0.0:8545 --api.enable"
+
+          volumes:
+            uchain_data1_ci:
+            uchain_data2_ci:
           EOF
+          echo "Created uchain_test_workflow.yml for CI."
 
       - name: Start containers with Docker Compose
         run: |
-          sudo docker-compose up -d
+          sudo docker-compose -f uchain_test_workflow.yml up -d
 
-      - name: Wait for node1 to produce blocks (with timeout)
+      - name: Wait for node1 to produce blocks
         run: |
-          echo "Waiting for node1 to produce blocks..."
-          max_attempts=30
+          echo "Waiting for uchain-node1 to produce blocks..."
+          max_attempts=30  # 30 attempts * 10 seconds = 5 minutes timeout
           attempt=1
           while [ ${attempt} -le ${max_attempts} ]; do
-            running=$(docker inspect -f '{{.State.Running}}' evmos-node1 2>/dev/null || echo "false")
-            if [ "$running" != "true" ]; then
-              echo "Node1 container is not running. Logs:"
-              docker logs evmos-node1
-              exit 1
-            fi
-
-            block=$(docker exec evmos-node1 curl -s http://localhost:26657/status 2>/dev/null | jq -r '.result.sync_info.latest_block_height' 2>/dev/null)
-            if [[ "$block" =~ ^[0-9]+$ ]] && [ "$block" -gt 0 ]; then
+            running=$(docker inspect -f '{{.State.Running}}' uchain-node1-ci 2>/dev/null || echo "false")
+            if [ "$running" != "true" ]; then echo "Node1 container is not running."; docker logs uchain-node1-ci; exit 1; fi
+            block=$(docker exec uchain-node1-ci curl -s http://localhost:26657/status 2>/dev/null | jq -r '.result.sync_info.latest_block_height' 2>/dev/null)
+            if [[ "$block" =~ ^[0-9]+$ ]] && [ "$block" -gt 2 ]; then # Wait for a few blocks
               echo "Node1 is producing blocks: $block"
               exit 0
             fi
-
-            echo "Attempt ${attempt}: Node1 not ready yet (block: '$block'), waiting 10 seconds..."
+            echo "Attempt ${attempt}/${max_attempts}: Node1 not ready yet (block: '$block'), waiting 10 seconds..."
             sleep 10
             attempt=$((attempt + 1))
           done
-          echo "Node1 failed to produce blocks within timeout."
-          exit 1
-        shell: /usr/bin/bash -e {0}
+          echo "Node1 failed to produce blocks within timeout."; docker logs uchain-node1-ci; exit 1
+        shell: bash -e {0}
 
-      - name: Get node1's ID
-        id: node1_info
+      - name: Wait for node2 to start and peer
         run: |
-          NODE1_ID=$(docker exec evmos-node1 evmosd tendermint show-node-id)
-          echo "NODE1_ID=${NODE1_ID}" >> $GITHUB_ENV
-          echo "Node1 ID: ${NODE1_ID}"
-
-      - name: Restart node2 with peer info
-        run: |
-          sudo docker-compose stop node2
-          sudo docker-compose rm -f node2
-          sudo NODE1_ID=$NODE1_ID docker-compose up -d node2
-
-      - name: Verify connection between nodes
-        run: |
-          echo "Checking connection between nodes..."
-          until docker exec evmos-node1 curl -s http://localhost:26657/net_info | jq -e '.result.peers | length > 0'; do
-            echo "Waiting for nodes to connect..."
-            sleep 5
+          echo "Waiting for uchain-node2 to start and peer..."
+          max_attempts=18 # 18 attempts * 10 seconds = 3 minutes
+          attempt=1
+          while [ ${attempt} -le ${max_attempts} ]; do
+            running=$(docker inspect -f '{{.State.Running}}' uchain-node2-ci 2>/dev/null || echo "false")
+            if [ "$running" != "true" ]; then echo "Node2 container is not running."; docker logs uchain-node2-ci; exit 1; fi
+            peer_count=$(docker exec uchain-node2-ci curl -s http://localhost:26657/net_info 2>/dev/null | jq -r '.result.n_peers' 2>/dev/null)
+            if [[ "$peer_count" =~ ^[0-9]+$ ]] && [ "$peer_count" -gt 0 ]; then
+              echo "Node2 has $peer_count peer(s)."
+              exit 0
+            fi
+            echo "Attempt ${attempt}/${max_attempts}: Node2 not peered yet (peers: '$peer_count'), waiting 10 seconds..."
+            sleep 10
+            attempt=$((attempt + 1))
           done
-          PEER_COUNT=$(docker exec evmos-node2 curl -s http://localhost:26657/net_info | jq '.result.peers | length')
-          if [ "$PEER_COUNT" -gt 0 ]; then
-            echo "✅ Success: Nodes are connected (${PEER_COUNT} peers)"
+          echo "Node2 failed to peer within timeout."; docker logs uchain-node2-ci; exit 1
+        shell: bash -e {0}
+
+      - name: Verify connection between nodes (final check)
+        run: |
+          echo "Verifying connection between nodes..."
+          PEER_COUNT_N1=$(docker exec uchain-node1-ci curl -s http://localhost:26657/net_info 2>/dev/null | jq '.result.peers | length')
+          PEER_COUNT_N2=$(docker exec uchain-node2-ci curl -s http://localhost:26657/net_info 2>/dev/null | jq '.result.peers | length')
+          if [ "$PEER_COUNT_N1" -gt 0 ] && [ "$PEER_COUNT_N2" -gt 0 ]; then
+            echo "✅ Success: Nodes are connected (Node1 sees $PEER_COUNT_N1, Node2 sees $PEER_COUNT_N2 peers)"
           else
-            echo "❌ Error: Nodes failed to connect"
-            exit 1
+            echo "❌ Error: Nodes failed to connect (N1 peers: $PEER_COUNT_N1, N2 peers: $PEER_COUNT_N2)"
+            docker logs uchain-node1-ci; docker logs uchain-node2-ci; exit 1
           fi
 
-      - name: Run RPC and TX tests
+      - name: Run RPC and TX tests (using u.cash)
         run: |
-          echo "Listing wallet addresses via JSON-RPC..."
+          echo "Listing wallet addresses via JSON-RPC on node1..."
           RPC_ACCOUNTS=$(curl -s -X POST http://localhost:8545 -H "Content-Type: application/json" \
             --data '{"jsonrpc":"2.0","method":"eth_accounts","params":[],"id":1}' | jq -r '.result')
-          echo "JSON-RPC Accounts: $RPC_ACCOUNTS"
+          echo "JSON-RPC Accounts on node1: $RPC_ACCOUNTS"
 
-          NEW_MNEMONIC="test test test test test test test test test test test junk"
-          TEST_KEY="test-key-$(date +%s)"
-          echo "Importing new key '$TEST_KEY'..."
-          printf "%s\n" "$NEW_MNEMONIC" | docker exec -i evmos-node1 evmosd keys add "$TEST_KEY" --recover --index 1 --keyring-backend=test --output=json
-          NEW_ADDR=$(docker exec evmos-node1 evmosd keys show "$TEST_KEY" -a --keyring-backend=test)
-          echo "New account address: $NEW_ADDR"
+          SENDER_KEY_NAME="${KEY_NAME}" # This is validator1-ci by default
+          SENDER_ADDR=$(docker exec uchain-node1-ci evmosd keys show "$SENDER_KEY_NAME" -a --keyring-backend=${KEYRING_BACKEND})
+          echo "Sender key name: $SENDER_KEY_NAME, Sender address: $SENDER_ADDR"
 
-          echo "Balances of new account BEFORE transaction:"
-          docker exec evmos-node1 evmosd query bank balances "$NEW_ADDR" --output json || true
+          NEW_TEST_MNEMONIC="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+          NEW_TEST_KEY="ci-tx-test-key-$(date +%s)"
+          echo "Importing new key '$NEW_TEST_KEY' into node1..."
+          echo "$NEW_TEST_MNEMONIC" | docker exec -i uchain-node1-ci evmosd keys add "$NEW_TEST_KEY" --recover --keyring-backend=${KEYRING_BACKEND} --output=json
+          NEW_ADDR=$(docker exec uchain-node1-ci evmosd keys show "$NEW_TEST_KEY" -a --keyring-backend=${KEYRING_BACKEND})
+          echo "New account address on node1: $NEW_ADDR"
 
-          SENDER=$(docker exec evmos-node1 evmosd keys show validator -a --keyring-backend=test)
-          echo "Sender address: $SENDER"
+          echo "Balances of new account $NEW_ADDR on node1 BEFORE transaction:"
+          docker exec uchain-node1-ci evmosd query bank balances "$NEW_ADDR" --output json || true
 
-          echo "Sending 1aevmos from sender to new account..."
-          docker exec evmos-node1 evmosd tx bank send "$SENDER" "$NEW_ADDR" 1aevmos --chain-id "$CHAIN_ID" --keyring-backend=test --gas-prices "0.000001aevmos" --yes
+          TX_AMOUNT="1000000000000000000ucash" # 1 u.cash (assuming 10^18 base units)
+          GAS_PRICES="0.0001ucash"
+          echo "Sending $TX_AMOUNT from $SENDER_ADDR to $NEW_ADDR on node1 (fees: $GAS_PRICES)..."
+          
+          docker exec uchain-node1-ci evmosd tx bank send "$SENDER_ADDR" "$NEW_ADDR" "$TX_AMOUNT" \
+            --chain-id "${CHAIN_ID}" \
+            --keyring-backend=${KEYRING_BACKEND} \
+            --from "$SENDER_KEY_NAME" \
+            --gas-prices "$GAS_PRICES" \
+            --yes -b block --broadcast-mode=sync # Using sync for CI to get immediate feedback
 
-          echo "Waiting for transaction to process..."
-          sleep 10
+          echo "Waiting 5 seconds for transaction to be included in a block..."
+          sleep 5 
 
-          echo "Balances of new account AFTER transaction:"
-          docker exec evmos-node1 evmosd query bank balances "$NEW_ADDR" --output json
-        shell: /usr/bin/bash -e {0}
+          echo "Balances of new account $NEW_ADDR on node1 AFTER transaction:"
+          docker exec uchain-node1-ci evmosd query bank balances "$NEW_ADDR" --output json
+          
+          BALANCE_AFTER=$(docker exec uchain-node1-ci evmosd query bank balances "$NEW_ADDR" --output json | jq -r '.balances[] | select(.denom=="ucash") | .amount')
+          EXPECTED_BALANCE="1000000000000000000"
+          if [ "$BALANCE_AFTER" == "$EXPECTED_BALANCE" ]; then
+            echo "✅ Success: Transaction successful, new balance is $BALANCE_AFTER ucash."
+          else
+            echo "❌ Error: Transaction failed or balance incorrect. Balance after: $BALANCE_AFTER ucash. Expected $EXPECTED_BALANCE ucash"
+            exit 1
+          fi
+        shell: bash -e {0}
+
